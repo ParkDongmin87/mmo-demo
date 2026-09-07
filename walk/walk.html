@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>데모 맵 순찰 — MMO 애셋 시험판</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#17150f; --surface:#211e16; --sunk:#100e08;
+  --line:#3a3427; --line-soft:#2c281e;
+  --text:#ece4d4; --muted:#9a9082; --accent:#8fadd9; --accent-soft:#22293a;
+  --stop:#c9705f; --go:#7fb08a;
+  --display:"Gowun Batang",Georgia,serif;
+  --body:"Noto Sans KR",system-ui,-apple-system,"Malgun Gothic",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;
+  display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 20px;
+  padding:14px 20px 12px;border-bottom:1px solid var(--line)}
+h1{font-family:var(--display);font-size:22px;font-weight:700;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;margin:0}
+.sub b{color:var(--text);font-weight:500}
+
+.bar{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;
+  padding:10px 20px;background:var(--surface);border-bottom:1px solid var(--line-soft)}
+.grp{display:flex;align-items:center;gap:7px}
+.grp>label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.tabs{display:flex;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.tabs button{appearance:none;border:0;border-right:1px solid var(--line);background:var(--surface);
+  color:var(--muted);font-family:var(--body);font-size:12.5px;font-weight:500;padding:5px 12px;cursor:pointer}
+.tabs button:last-child{border-right:0}
+.tabs button:hover:not(:disabled){background:var(--accent-soft);color:var(--text)}
+.tabs button[aria-pressed="true"]{background:var(--accent);color:#12141a}
+.tabs button:disabled{opacity:.35;cursor:default}
+.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+#view{position:relative;flex:1;min-height:280px;overflow:hidden;background:#0b0a08;
+  cursor:crosshair;touch-action:none}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+#stage img,#stage div,#stage canvas{position:absolute;image-rendering:pixelated}
+#floor{left:0;top:0;z-index:-10}
+#grid{left:0;top:0;pointer-events:none;z-index:900000}
+#shadow,#hero{width:96px;height:96px;background-repeat:no-repeat}
+#shadow{z-index:-5;pointer-events:none}
+#marker{width:48px;height:24px;pointer-events:none;z-index:899000;border-radius:50%;
+  border:2px solid var(--accent);opacity:0;transition:opacity .25s}
+/* 화면 정중앙 표식 — 캐릭터가 늘 여기에 선다 */
+#crosshair{position:absolute;left:50%;top:50%;width:1px;height:1px;pointer-events:none;
+  box-shadow:0 0 0 1px rgba(143,173,217,.28);opacity:0;transition:opacity .2s;z-index:5}
+#view[data-showgrid="1"] #crosshair{opacity:1}
+
+footer{display:flex;flex-wrap:wrap;gap:7px 8px;align-items:center;
+  padding:9px 20px;border-top:1px solid var(--line-soft);background:var(--surface)}
+.chip{font-family:var(--mono);font-size:11.5px;padding:3px 9px;border-radius:2px;
+  background:var(--sunk);border:1px solid var(--line-soft);font-variant-numeric:tabular-nums}
+.chip b{font-weight:600}
+.chip[data-tone="stop"]{color:var(--stop);border-color:var(--stop)}
+.chip[data-tone="go"]{color:var(--go);border-color:var(--go)}
+.note{margin-left:auto;color:var(--muted);font-size:11.5px}
+.note a{color:var(--accent)}
+@media (max-width:640px){
+  header{padding:10px 12px 8px} .bar,footer{padding:8px 12px} h1{font-size:19px}
+  .note{margin-left:0;width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>데모 맵 순찰</h1>
+  <p class="sub">40×40 아이소 데모 맵. 갈 곳을 누르면 걸어간다 — <b>물·담장·나무·돌은 지나갈 수 없고</b> 대문 두 칸만 담을 통과한다. 카메라는 캐릭터를 화면 중앙에 고정한다.</p>
+</header>
+
+<div class="bar">
+  <div class="grp"><label>캐릭터</label><div class="tabs" id="who"></div></div>
+  <div class="grp"><label>이동</label><div class="tabs" id="gait"></div></div>
+  <div class="grp"><label>배율</label><div class="tabs" id="zoom"></div></div>
+  <div class="grp"><div class="tabs">
+    <button id="atk" type="button">공격</button>
+    <button id="jab" type="button">잽</button>
+    <button id="die" type="button">쓰러짐</button>
+    <button id="gridbtn" type="button" aria-pressed="false">통행 격자</button>
+  </div></div>
+</div>
+
+<div id="view">
+  <div id="stage">
+    <img id="floor" alt="">
+    <canvas id="grid"></canvas>
+    <div id="marker"></div>
+    <div id="shadow"></div>
+    <div id="hero"></div>
+  </div>
+  <div id="crosshair"></div>
+</div>
+
+<footer>
+  <span class="chip">칸 <b id="r-tile">—</b></span>
+  <span class="chip">동작 <b id="r-act">대기</b></span>
+  <span class="chip">방향 <b id="r-dir">S</b></span>
+  <span class="chip">남은 경로 <b id="r-path">0</b>칸</span>
+  <span class="chip" id="r-hit" data-tone="go">지날 수 있음</span>
+  <span class="note">캐릭터 72&nbsp;px · 8방향 × 16프레임 · 통행 <b id="r-walk">—</b>/1600칸 · <a href="../demo40.html">지도 원본</a></span>
+</footer>
+
+<script>
+const DIRS = ["s","se","e","ne","n","nw","w","sw"];
+const CELL = 96, SCOLS = 16, SROWS = 8, ANCH = [44, 72];
+const ACT = {idle:{ko:"대기",loop:true,fps:10}, walk:{ko:"걷기",loop:true,fps:14},
+             run:{ko:"달리기",loop:true,fps:18}, attack:{ko:"공격",loop:false,fps:16},
+             jab:{ko:"잽",loop:false,fps:16}, dead:{ko:"쓰러짐",loop:false,fps:12}};
+const GAIT_SPD = {walk:3.0, run:4.8};   // 칸/s — 오너가 눈으로 정한 값
+
+const view = document.getElementById("view"), stage = document.getElementById("stage");
+const floorEl = document.getElementById("floor"), hero = document.getElementById("hero");
+const shadowEl = document.getElementById("shadow"), marker = document.getElementById("marker");
+const gridC = document.getElementById("grid"), jabBtn = document.getElementById("jab");
+
+let M, WALK, N, MM, TW, TH, HW, HH, OX, OY, CW, CH, FLOORS;
+const S = {zoom:2, ch:null, gait:"walk", speed:3.0, showGrid:false,
+           fi:0, fj:0, path:[], act:"idle", dir:"s", f:0, t:0, once:null};
+
+const tileCenter = (i,j) => [OX + HW*(i-j), OY + HH*(i+j)];
+const inb = (i,j) => i>=0 && i<N && j>=0 && j<MM;
+const free = (i,j) => inb(i,j) && WALK[i][j] === 1;
+function pxToTile(px, py){
+  const x = px - OX, y = py - OY;
+  return [ (y/HH + x/HW)/2, (y/HH - x/HW)/2 ];
+}
+
+const NB = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.414],[1,-1,1.414],[-1,1,1.414],[-1,-1,1.414]];
+function astar(s, g){
+  if (!free(g[0],g[1]) || (s[0]===g[0] && s[1]===g[1])) return [];
+  const key = (i,j) => i*MM+j, gs = new Map(), prev = new Map();
+  const h = (i,j) => Math.hypot(i-g[0], j-g[1]);
+  const open = [[h(s[0],s[1]), s[0], s[1]]];
+  gs.set(key(s[0],s[1]), 0);
+  let guard = 0;
+  while (open.length && guard++ < 80000){
+    open.sort((a,b)=>a[0]-b[0]);
+    const [, ci, cj] = open.shift();
+    if (ci===g[0] && cj===g[1]){
+      const out = []; let k = key(ci,cj), c = [ci,cj];
+      while (prev.has(k)){ out.push(c); c = prev.get(k); k = key(c[0],c[1]); }
+      return out.reverse();
+    }
+    const cg = gs.get(key(ci,cj));
+    for (const [di,dj,w] of NB){
+      const ni = ci+di, nj = cj+dj;
+      if (!free(ni,nj)) continue;
+      if (di && dj && (!free(ci+di,cj) || !free(ci,cj+dj))) continue;   // 담 모서리를 대각으로 뚫지 못하게
+      const nk = key(ni,nj), ng = cg + w;
+      if (gs.has(nk) && gs.get(nk) <= ng) continue;
+      gs.set(nk, ng); prev.set(nk, [ci,cj]);
+      open.push([ng + h(ni,nj), ni, nj]);
+    }
+  }
+  return [];
+}
+function nearestFree(i,j){
+  if (free(i,j)) return [i,j];
+  for (let r=1; r<=6; r++)
+    for (let a=-r; a<=r; a++) for (let b=-r; b<=r; b++)
+      if (Math.max(Math.abs(a),Math.abs(b))===r && free(i+a,j+b)) return [i+a,j+b];
+  return null;
+}
+
+function tabs(host, items, get, set){
+  host.innerHTML = "";
+  for (const [v,l] of items){
+    const b = document.createElement("button"); b.type="button"; b.textContent=l;
+    b.setAttribute("aria-pressed", String(get()===v));
+    b.onclick = () => { set(v); [...host.children].forEach((c,k)=>
+      c.setAttribute("aria-pressed", String(get()===host._i[k][0]))); };
+    host.appendChild(b);
+  }
+  host._i = items;
+}
+
+function drawGrid(){
+  const g = gridC.getContext("2d");
+  g.clearRect(0,0,CW,CH);
+  view.setAttribute("data-showgrid", S.showGrid ? "1" : "0");
+  if (!S.showGrid) return;
+  for (let i=0;i<N;i++) for (let j=0;j<MM;j++){
+    if (WALK[i][j]) continue;
+    const c = tileCenter(i,j);
+    g.beginPath();
+    g.moveTo(c[0], c[1]-HH); g.lineTo(c[0]+HW, c[1]); g.lineTo(c[0], c[1]+HH); g.lineTo(c[0]-HW, c[1]);
+    g.closePath();
+    g.fillStyle = "rgba(190,58,48,.30)"; g.fill();
+    g.strokeStyle = "rgba(230,90,70,.5)"; g.lineWidth = 1; g.stroke();
+  }
+}
+
+/* 카메라: 캐릭터를 화면 정중앙에 둔다 (리니지 방식). 지도 밖은 배경색으로 남는다. */
+function camera(){
+  const c = tileCenter(S.fi, S.fj);
+  stage.style.transform =
+    "translate(" + (view.clientWidth/2 - c[0]*S.zoom) + "px," +
+                   (view.clientHeight/2 - c[1]*S.zoom) + "px) scale(" + S.zoom + ")";
+}
+
+view.addEventListener("pointerup", e => {
+  const r = view.getBoundingClientRect();
+  const c = tileCenter(S.fi, S.fj);
+  const sx = (e.clientX - r.left - (view.clientWidth/2 - c[0]*S.zoom)) / S.zoom;
+  const sy = (e.clientY - r.top  - (view.clientHeight/2 - c[1]*S.zoom)) / S.zoom;
+  const t = pxToTile(sx, sy);
+  const gi = Math.round(t[0]), gj = Math.round(t[1]);
+  const hit = document.getElementById("r-hit"), ok = free(gi,gj);
+  hit.textContent = ok ? "지날 수 있음" : "막힌 칸 — 가장 가까운 곳으로";
+  hit.setAttribute("data-tone", ok ? "go" : "stop");
+  const tgt = ok ? [gi,gj] : nearestFree(gi,gj);
+  if (!tgt) return;
+  S.path = astar([Math.round(S.fi), Math.round(S.fj)], tgt);
+  S.once = null;
+  const m = tileCenter(tgt[0], tgt[1]);
+  marker.style.left = (m[0]-HW)+"px"; marker.style.top = (m[1]-HH)+"px";
+  marker.style.opacity = "1"; setTimeout(()=>marker.style.opacity="0", 900);
+});
+
+let last = performance.now(), ft = 0, fk = 0;
+function frame(now){
+  const dt = Math.min(0.05, (now-last)/1000); last = now;
+
+  ft += dt;
+  if (ft >= 1/M.fps){ ft = 0; fk = (fk+1) % FLOORS.length; floorEl.src = FLOORS[fk]; }
+
+  if (S.path.length){
+    const t0 = S.path[0];
+    const dx = t0[0]-S.fi, dy = t0[1]-S.fj, d = Math.hypot(dx,dy), step = S.speed*dt;
+    if (d <= step){ S.fi = t0[0]; S.fj = t0[1]; S.path.shift(); }
+    else { S.fi += dx/d*step; S.fj += dy/d*step; }
+    // 화면상 진행 방향으로 8방향을 고른다 — 격자 방향과 화면 방향이 다르다
+    const ang = Math.atan2(-(HH*(dx+dy)), HW*(dx-dy));
+    S.dir = ["e","ne","n","nw","w","sw","s","se"][(Math.round(ang/(Math.PI/4))+8)%8];
+    if (S.act !== S.gait){ S.act = S.gait; S.f = 0; S.t = 0; }
+  } else if (!S.once && S.act !== "idle"){ S.act = "idle"; S.f = 0; S.t = 0; }
+
+  const a = ACT[S.act];
+  S.t += dt*a.fps;
+  while (S.t >= 1){
+    S.t -= 1;
+    if (a.loop) S.f = (S.f+1) % SCOLS;
+    else if (S.f < SCOLS-1) S.f++;
+    else if (S.once === "attack" || S.once === "jab"){ S.once = null; S.act = "idle"; S.f = 0; }
+  }
+
+  const c = tileCenter(S.fi, S.fj);
+  const L = (c[0]-ANCH[0])+"px", T = (c[1]-ANCH[1])+"px";
+  const bs = (CELL*SCOLS)+"px "+(CELL*SROWS)+"px";
+  const bp = (-S.f*CELL)+"px "+(-DIRS.indexOf(S.dir)*CELL)+"px";
+  hero.style.left = L; hero.style.top = T;
+  hero.style.zIndex = String(Math.round((S.fi+S.fj)*100 + S.fj));
+  hero.style.backgroundImage = "url("+SHEET(S.ch, S.act)+")";
+  hero.style.backgroundSize = bs; hero.style.backgroundPosition = bp;
+
+  const sh = SHEET(S.ch, S.act, true);
+  shadowEl.hidden = !sh;
+  if (sh){
+    shadowEl.style.left = L; shadowEl.style.top = T;
+    shadowEl.style.backgroundImage = "url("+sh+")";
+    shadowEl.style.backgroundSize = bs; shadowEl.style.backgroundPosition = bp;
+  }
+  camera();
+
+  document.getElementById("r-tile").textContent = Math.round(S.fi)+", "+Math.round(S.fj);
+  document.getElementById("r-act").textContent = a.ko;
+  document.getElementById("r-dir").textContent = S.dir.toUpperCase();
+  document.getElementById("r-path").textContent = S.path.length;
+  requestAnimationFrame(frame);
+}
+
+function SHEET(ch, act, shadow){
+  const e = CHARS[ch] && CHARS[ch].actions[act];
+  if (!e) return null;
+  return "chars/" + ch + "/" + (shadow ? e.shadow : e.file);
+}
+
+let CHARS;
+Promise.all([fetch("walk.json").then(r=>r.json()), fetch("chars.json").then(r=>r.json())])
+.then(([meta, chars]) => {
+  M = meta; CHARS = chars;
+  N = M.size[0]; MM = M.size[1];
+  TW = M.tile[0]; TH = M.tile[1]; HW = TW/2; HH = TH/2;
+  OX = M.origin[0]; OY = M.origin[1]; CW = M.canvas[0]; CH = M.canvas[1];
+  WALK = M.walk.map(r => r.split("").map(Number));
+  FLOORS = M.floor;
+  S.fi = M.start[0]; S.fj = M.start[1];
+  S.ch = Object.keys(CHARS)[0];
+
+  stage.style.width = CW+"px"; stage.style.height = CH+"px";
+  gridC.width = CW; gridC.height = CH;
+  for (const p of M.props){
+    const im = document.createElement("img");
+    im.src = "props/" + p.id + ".png"; im.alt = ""; im.draggable = false;
+    im.style.left = p.x+"px"; im.style.top = p.y+"px";
+    im.style.zIndex = String(p.d*100 + p.j2);
+    stage.appendChild(im);
+  }
+  floorEl.src = FLOORS[0];
+  document.getElementById("r-walk").textContent = WALK.flat().reduce((a,b)=>a+b,0);
+
+  tabs(document.getElementById("who"),
+       Object.keys(CHARS).map(k=>[k, CHARS[k].ko]), ()=>S.ch,
+       v => { S.ch = v; jabBtn.disabled = !CHARS[v].actions.jab;
+              if (!CHARS[v].actions[S.act]){ S.act="idle"; S.f=0; S.once=null; } });
+  tabs(document.getElementById("gait"), [["walk","걷기"],["run","달리기"]], ()=>S.gait,
+       v => { S.gait = v; S.speed = GAIT_SPD[v]; });
+  tabs(document.getElementById("zoom"), [[1,"1×"],[2,"2×"],[3,"3×"]], ()=>S.zoom,
+       v => { S.zoom = v; camera(); });
+  jabBtn.disabled = !CHARS[S.ch].actions.jab;
+
+  const one = a => () => { if (CHARS[S.ch].actions[a]){ S.path=[]; S.once=a; S.act=a; S.f=0; S.t=0; } };
+  document.getElementById("atk").onclick = one("attack");
+  jabBtn.onclick = one("jab");
+  document.getElementById("die").onclick = one("dead");
+  const gb = document.getElementById("gridbtn");
+  gb.onclick = () => { S.showGrid = !S.showGrid; gb.setAttribute("aria-pressed", String(S.showGrid)); drawGrid(); };
+
+  drawGrid(); camera();
+  addEventListener("resize", camera);
+  requestAnimationFrame(frame);
+})
+.catch(e => {
+  document.getElementById("view").innerHTML =
+    '<p style="padding:24px;color:#c9705f;font-family:var(--mono)">자원을 불러오지 못했습니다: ' + e + '</p>';
+});
+</script>
+</body>
+</html>
