@@ -46,7 +46,7 @@ h1{font-family:var(--display);font-size:22px;font-weight:700;margin:0;letter-spa
 #stage img,#stage div,#stage canvas{position:absolute;image-rendering:pixelated}
 #floor{left:0;top:0;z-index:-10}
 #grid{left:0;top:0;pointer-events:none;z-index:900000}
-#shadow,#hero{width:96px;height:96px;background-repeat:no-repeat}
+#shadow,#hero{display:block}
 #shadow{z-index:-5;pointer-events:none}
 #marker{width:48px;height:24px;pointer-events:none;z-index:899000;border-radius:50%;
   border:2px solid var(--accent);opacity:0;transition:opacity .25s}
@@ -94,8 +94,8 @@ footer{display:flex;flex-wrap:wrap;gap:7px 8px;align-items:center;
     <img id="floor" alt="">
     <canvas id="grid"></canvas>
     <div id="marker"></div>
-    <div id="shadow"></div>
-    <div id="hero"></div>
+    <canvas id="shadow"></canvas>
+    <canvas id="hero"></canvas>
   </div>
   <div id="crosshair"></div>
 </div>
@@ -111,7 +111,7 @@ footer{display:flex;flex-wrap:wrap;gap:7px 8px;align-items:center;
 
 <script>
 const DIRS = ["s","se","e","ne","n","nw","w","sw"];
-const CELL = 96, SCOLS = 16, SROWS = 8, ANCH = [44, 72];
+// 시트는 행 = 8 방향, 열 = 프레임. 셀 크기·앵커·프레임 수는 동작마다 달라 매니페스트에서 읽는다
 const ACT = {idle:{ko:"대기",loop:true,fps:10}, walk:{ko:"걷기",loop:true,fps:14},
              run:{ko:"달리기",loop:true,fps:18}, attack:{ko:"공격",loop:false,fps:16},
              jab:{ko:"잽",loop:false,fps:16}, dead:{ko:"쓰러짐",loop:false,fps:12}};
@@ -245,43 +245,79 @@ function frame(now){
   } else if (!S.once && S.act !== "idle"){ S.act = "idle"; S.f = 0; S.t = 0; }
 
   const a = ACT[S.act];
+  let E = ENTRY(S.ch, S.act), NF = E ? E.frames : 1;
   S.t += dt*a.fps;
   while (S.t >= 1){
     S.t -= 1;
-    if (a.loop) S.f = (S.f+1) % SCOLS;
-    else if (S.f < SCOLS-1) S.f++;
+    if (a.loop) S.f = (S.f+1) % NF;
+    else if (S.f < NF-1) S.f++;
     else if (S.once === "attack" || S.once === "jab"){ S.once = null; S.act = "idle"; S.f = 0; }
   }
+  // 위 루프에서 동작이 바뀔 수 있다. 셀 크기·앵커·프레임 수는 동작마다 다르므로 여기서 다시 읽는다 —
+  // 옛 동작의 셀 크기로 새 동작 시트를 그리면 그 한 프레임 동안 시트가 통째로 펼쳐져 보인다.
+  E = ENTRY(S.ch, S.act); NF = E ? E.frames : 1;
+  if (S.f >= NF) S.f = NF-1;
 
-  const c = tileCenter(S.fi, S.fj);
-  const L = (c[0]-ANCH[0])+"px", T = (c[1]-ANCH[1])+"px";
-  const bs = (CELL*SCOLS)+"px "+(CELL*SROWS)+"px";
-  const bp = (-S.f*CELL)+"px "+(-DIRS.indexOf(S.dir)*CELL)+"px";
-  hero.style.left = L; hero.style.top = T;
-  hero.style.zIndex = String(Math.round((S.fi+S.fj)*100 + S.fj));
-  hero.style.backgroundImage = "url("+SHEET(S.ch, S.act)+")";
-  hero.style.backgroundSize = bs; hero.style.backgroundPosition = bp;
-
-  const sh = SHEET(S.ch, S.act, true);
+  const c = tileCenter(S.fi, S.fj), row = DIRS.indexOf(S.dir);
+  place(hero, E, SHEET(S.ch, S.act), c, row, S.f, false,
+        String(Math.round((S.fi+S.fj)*100 + S.fj)));
+  const sh = E && E.shadow ? SHEET(S.ch, S.act, true) : null;
   shadowEl.hidden = !sh;
-  if (sh){
-    shadowEl.style.left = L; shadowEl.style.top = T;
-    shadowEl.style.backgroundImage = "url("+sh+")";
-    shadowEl.style.backgroundSize = bs; shadowEl.style.backgroundPosition = bp;
-  }
+  if (sh) place(shadowEl, E, sh, c, row, S.f, true, null);
   camera();
 
   document.getElementById("r-tile").textContent = Math.round(S.fi)+", "+Math.round(S.fj);
-  document.getElementById("r-act").textContent = a.ko;
+  document.getElementById("r-act").textContent = ACT[S.act].ko;   // a 는 루프 앞 값이라 바뀐 동작을 못 따라간다
   document.getElementById("r-dir").textContent = S.dir.toUpperCase();
   document.getElementById("r-path").textContent = S.path.length;
   requestAnimationFrame(frame);
 }
 
+function ENTRY(ch, act){ return CHARS[ch] && CHARS[ch].actions[act]; }
+
+// 동작마다 셀 크기가 다르므로, 새 시트가 아직 안 받아진 채로 동작이 바뀌면 브라우저가
+// **옛 시트를 새 셀 크기로 늘려** 한순간 그린다 (캐릭터가 확 커졌다 돌아온다).
+// 시작할 때 전부 받아 두면 교체가 즉시 일어난다.
+const IMG = new Map();
+function sheetImage(url){
+  let im = IMG.get(url);
+  if (!im){ im = new Image(); im.src = url; IMG.set(url, im); }
+  return im;
+}
+function preloadSheets(){
+  for (const ch of Object.keys(CHARS))
+    for (const act of Object.keys(CHARS[ch].actions))
+      for (const shadow of [false, true]){
+        const url = SHEET(ch, act, shadow);
+        if (url) sheetImage(url);
+      }
+}
+
+// 셀 크기·앵커가 동작마다 다르므로 그릴 때마다 요소 크기와 배경 배치를 다시 잡는다.
+// 앵커는 "셀 안에서 지면 원점이 있는 자리" 라 타일 접지점에서 앵커만큼 빼면 제자리에 놓인다.
+// CSS 배경으로 그리면 이미지 교체와 셀 크기 변경이 **원자적이지 않다** — 동작이 바뀌는 순간
+// 브라우저가 옛 시트를 새 셀 크기로 늘려 한 프레임 그리고(시트가 펼쳐져 보인다), 시트가 클수록
+// 오래 남는다. 캔버스에 직접 한 칸만 그리면 그 틈이 없다. 덜 받아진 시트는 그냥 건너뛴다.
+function place(el, E, url, c, row, f, shadow, z){
+  if (!E || !url) return;
+  const im = sheetImage(url);
+  if (!im.complete || !im.naturalWidth) return;
+  const cv = shadow ? E.shadow_canvas : E.canvas;
+  const an = shadow ? E.shadow_anchor : E.anchor;
+  if (el.width !== cv[0] || el.height !== cv[1]){ el.width = cv[0]; el.height = cv[1]; }
+  const ctx = el.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cv[0], cv[1]);
+  ctx.drawImage(im, f*cv[0], row*cv[1], cv[0], cv[1], 0, 0, cv[0], cv[1]);
+  el.style.left = (c[0]-an[0])+"px"; el.style.top = (c[1]-an[1])+"px";
+  if (z !== null) el.style.zIndex = z;
+}
+
 function SHEET(ch, act, shadow){
   const e = CHARS[ch] && CHARS[ch].actions[act];
   if (!e) return null;
-  return "chars/" + ch + "/" + (shadow ? e.shadow : e.file);
+  const f = shadow ? e.shadow : e.file;
+  return f ? "chars/" + ch + "/" + f : null;
 }
 
 let CHARS;
@@ -306,6 +342,7 @@ Promise.all([fetch("walk.json").then(r=>r.json()), fetch("chars.json").then(r=>r
     stage.appendChild(im);
   }
   floorEl.src = FLOORS[0];
+  preloadSheets();
   document.getElementById("r-walk").textContent = WALK.flat().reduce((a,b)=>a+b,0);
 
   tabs(document.getElementById("who"),
