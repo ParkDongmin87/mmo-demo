@@ -116,7 +116,7 @@ const DIRS = ["s","se","e","ne","n","nw","w","sw"];
 // fps 는 매니페스트에 재생 규칙이 없는 옛 시트를 위한 대비값이다. format 3 시트는 kind·fps 를
 // 실어 오고, 이동 루프(walk/run)만 아래 값으로 돈다 — 걸음은 이동 속도에 맞춰야 미끄러지지 않는다.
 const ACT = {idle:{ko:"대기",loop:true,fps:10}, idle_blade:{ko:"대기(칼)",loop:true,fps:10},
-             walk:{ko:"걷기",loop:true,fps:14},
+             walk:{ko:"걷기",loop:true,fps:14}, spear_walk:{ko:"걷기(칼)",loop:true,fps:14},
              run:{ko:"달리기",loop:true,fps:18}, attack:{ko:"공격",loop:false,fps:16},
              jab:{ko:"잽",loop:false,fps:16}, dead:{ko:"쓰러짐",loop:false,fps:12}};
 const GAIT_SPD = {walk:3.0, run:4.8};   // 칸/s — 오너가 눈으로 정한 값
@@ -245,7 +245,8 @@ function frame(now){
     // 화면상 진행 방향으로 8방향을 고른다 — 격자 방향과 화면 방향이 다르다
     const ang = Math.atan2(-(HH*(dx+dy)), HW*(dx-dy));
     S.dir = ["e","ne","n","nw","w","sw","s","se"][(Math.round(ang/(Math.PI/4))+8)%8];
-    if (S.act !== S.gait){ S.act = S.gait; S.f = 0; S.t = 0; }
+    const want = gaitAct(S.ch, S.gait, S.stance);
+    if (S.act !== want){ S.act = want; S.f = 0; S.t = 0; }
   } else if (!S.once && S.act !== S.stance){ S.act = S.stance; S.f = 0; S.t = 0; }
 
   const a = ACT[S.act];
@@ -254,7 +255,9 @@ function frame(now){
   // 클립이 16 장·24 장으로 뽑혀 두 캐릭터의 공격 속도가 1.5 배 달랐다 — 그 값이 여기 있었다.
   const kind = (E && E.kind) || (a.loop ? "move" : "oneshot");
   const loop = kind === "move" || kind === "ambient";
-  const fps  = kind === "move" ? a.fps : ((E && E.fps) || a.fps);
+  // 이동 시트의 재생 속도는 시트가 아니라 **걸음걸이**가 정한다 — 칼 자세는 걷기·달리기가
+  // 같은 창걷기 시트를 쓰고 달리기만 빠르게 돈다.
+  const fps  = kind === "move" ? (ACT[S.gait] || a).fps : ((E && E.fps) || a.fps);
   if (kind === "hold"){ S.f = 0; S.t = 0; }
   else {
     S.t += dt*fps;
@@ -286,6 +289,12 @@ function frame(now){
 }
 
 function ENTRY(ch, act){ return CHARS[ch] && CHARS[ch].actions[act]; }
+
+// 칼 자세에서 걸으면 창걷기 시트를 쓴다 — 이 캐릭터가 가진 이동 클립 중 뽑은 도를 손에 든
+// 것은 그것뿐이다. 무장 달리기 클립은 없어서 같은 시트를 빠르게 돌린다(속도는 gait 가 정한다).
+function gaitAct(ch, gait, stance){
+  return (stance === "idle_blade" && ENTRY(ch, "spear_walk")) ? "spear_walk" : gait;
+}
 
 // 동작마다 셀 크기가 다르므로, 새 시트가 아직 안 받아진 채로 동작이 바뀌면 브라우저가
 // **옛 시트를 새 셀 크기로 늘려** 한순간 그린다 (캐릭터가 확 커졌다 돌아온다).
